@@ -16,6 +16,9 @@ public enum PairingError: Error {
     case decryptionError
     case noPatchInfo
     case nfcNotSupported
+    case activationFailed
+    case streamingEnableFailed
+    case unexpectedSensorState
 }
 
 extension PairingError: LocalizedError {
@@ -33,6 +36,12 @@ extension PairingError: LocalizedError {
             return LocalizedString("Could not get patch info", comment: "error description for PairingError.noPatchInfo")
         case .nfcNotSupported:
             return LocalizedString("Phone NFC not supported!", comment: "error description for PairingError.nfcNotSupported")
+        case .activationFailed:
+            return LocalizedString("Could not activate Libre 2 sensor", comment: "error description for PairingError.activationFailed")
+        case .streamingEnableFailed:
+            return LocalizedString("Could not enable Libre 2 Bluetooth streaming", comment: "error description for PairingError.streamingEnableFailed")
+        case .unexpectedSensorState:
+            return LocalizedString("Unexpected Libre 2 sensor state", comment: "error description for PairingError.unexpectedSensorState")
         }
     }
 
@@ -109,114 +118,306 @@ public class SensorPairingService: NSObject, NFCTagReaderSessionDelegate, Sensor
         guard let firstTag = tags.first else { return }
         guard case .iso15693(let tag) = firstTag else { return }
 
-        let blocks = 43
-        let requestBlocks = 3
-
-        let requests = Int(ceil(Double(blocks) / Double(requestBlocks)))
-        let remainder = blocks % requestBlocks
-        var dataArray = [Data](repeating: Data(), count: blocks)
-
         session.connect(to: firstTag) { error in
-            if error != nil {
+            if let error {
+                self.logNFC("Libre2 NFC: connection failed: \(error.localizedDescription)")
+                session.invalidate(errorMessage: error.localizedDescription)
+                self.sendError(error)
                 return
             }
 
             tag.getSystemInfo(requestFlags: [.address, .highDataRate]) { result in
                 switch result {
-                case .failure:
+                case .failure(let error):
+                    self.logNFC("Libre2 NFC: getSystemInfo failed: \(error.localizedDescription)")
                     session.invalidate(errorMessage: PairingError.noTagInfo.localizedDescription)
                     self.sendError(PairingError.noTagInfo)
                     return
                 case .success:
                     tag.customCommand(requestFlags: .highDataRate, customCommandCode: 0xA1, customRequestParameters: Data()) { response, error in
+                        if let error {
+                            self.logNFC("Libre2 NFC: patchInfo command failed: \(error.localizedDescription)")
+                            session.invalidate(errorMessage: PairingError.noPatchInfo.localizedDescription)
+                            self.sendError(PairingError.noPatchInfo)
+                            return
+                        }
 
-                        for i in 0 ..< requests {
-                            tag.readMultipleBlocks(
-                                requestFlags: [.highDataRate, .address],
-                                // swiftlint:disable:next line_length
-                                blockRange: NSRange(UInt8(i * requestBlocks) ... UInt8(i * requestBlocks + (i == requests - 1 ? (remainder == 0 ? requestBlocks : remainder) : requestBlocks) - (requestBlocks > 1 ? 1 : 0)))
-                                
-                            ) { blockArray, error in
-                                if error != nil {
-                                    if i != requests - 1 { return }
-                                } else {
-                                    for j in 0 ..< blockArray.count {
-                                        dataArray[i * requestBlocks + j] = blockArray[j]
-                                    }
-                                }
+                        let sensorUID = Data(tag.identifier.reversed())
+                        let patchInfo = response
 
-                                if i == requests - 1 {
-                                    var fram = Data()
+                        guard sensorUID.count == 8 else {
+                            self.logNFC("Libre2 NFC: unexpected UID length: \(sensorUID.count)")
+                            session.invalidate(errorMessage: PairingError.noSensorData.localizedDescription)
+                            self.sendError(PairingError.noSensorData)
+                            return
+                        }
 
-                                    for (_, data) in dataArray.enumerated() {
-                                        if data.count > 0 {
-                                            fram.append(data)
-                                        }
-                                    }
+                        guard patchInfo.count >= 6 else {
+                            self.logNFC("Libre2 NFC: patchInfo too short: \(patchInfo.hexEncodedString())")
+                            session.invalidate(errorMessage: PairingError.noPatchInfo.localizedDescription)
+                            self.sendError(PairingError.noPatchInfo)
+                            return
+                        }
 
-                                    // get sensorUID and patchInfo and send to delegate
-                                    let sensorUID = Data(tag.identifier.reversed())
-                                    let patchInfo = response
+                        let sensorType = SensorType(patchInfo: patchInfo)
+                        self.logNFC("Libre2 NFC: patchInfo: \(patchInfo.hexEncodedString()), sensorType: \(sensorType)")
 
-                                    // patchInfo should have length 6, which sometimes is not the case, as there are occuring crashes in nfcCommand and Libre2BLEUtilities.streamingUnlockPayload
-                                    guard patchInfo.count >= 6 else {
-                                        session.invalidate(errorMessage: PairingError.noPatchInfo.localizedDescription)
-                                        return
-                                    }
+                        guard sensorType == .libre2 else {
+                            self.logNFC("Libre2 NFC: wrong sensor type detected: \(sensorType)")
+                            session.invalidate(errorMessage: PairingError.wrongSensorType.localizedDescription)
+                            self.sendError(PairingError.wrongSensorType)
+                            return
+                        }
 
-                                    let subCmd: Subcommand = .enableStreaming
-                                    let cmd = self.nfcCommand(subCmd, unlockCode: self.unlockCode, patchInfo: patchInfo, sensorUID: sensorUID)
-
-                                    tag.customCommand(requestFlags: .highDataRate, customCommandCode: Int(cmd.code), customRequestParameters: cmd.parameters) { response, _ in
-                                        var streamingEnabled = false
-                                        var macAddress : String?
-
-                                        if subCmd == .enableStreaming && response.count == 6 {
-                                            streamingEnabled = true
-                                            macAddress = Data(response.reversed()).hexEncodedString().uppercased()
-                                        }
-
-                                        
-
-                                        let patchHex = patchInfo.hexEncodedString()
-                                        let sensorType = SensorType(patchInfo: patchInfo)
-
-                                        print("got patchhex: \(patchHex) and sensorType: \(sensorType), with mac address: \(macAddress)")
-
-                                        guard sensorUID.count == 8 && patchInfo.count == 6 && fram.count == 344 else {
-                                            // self.readingsSubject.send(completion: .failure(LibreError.noSensorData))
-                                            session.invalidate(errorMessage: PairingError.noSensorData.localizedDescription)
-                                            self.sendError(PairingError.noSensorData)
-                                            return
-                                        }
-                                        
-                                        guard sensorType == .libre2  else {
-                                            session.invalidate(errorMessage: PairingError.wrongSensorType.localizedDescription)
-                                            self.sendError(PairingError.noSensorData)
-                                            return
-                                        }
-                                        
-                                        
-
-                                        do {
-                                            let decryptedBytes = try Libre2.decryptFRAM(type: sensorType, id: [UInt8](sensorUID), info: patchInfo, data: [UInt8](fram))
-
-                                            self.sendUpdate(SensorPairingInfo(uuid: sensorUID, patchInfo: patchInfo, fram: Data(decryptedBytes), streamingEnabled: streamingEnabled, macAddress: macAddress))
-                                            session.invalidate()
-                                            return
-                                        } catch {
-                                            print("problem decrypting")
-                                            session.invalidate(errorMessage: PairingError.decryptionError.localizedDescription)
-                                            self.sendError(PairingError.decryptionError)
-                                        }
-                                    }
-                                }
+                        self.readSensorData(tag: tag, sensorUID: sensorUID, patchInfo: patchInfo, sensorType: sensorType) { initialResult in
+                            switch initialResult {
+                            case .failure(let error):
+                                self.failPairing(session: session, error: error)
+                            case .success(let initial):
+                                self.finishPairing(
+                                    tag: tag,
+                                    session: session,
+                                    sensorUID: sensorUID,
+                                    patchInfo: patchInfo,
+                                    sensorType: sensorType,
+                                    initialSensorData: initial.sensorData
+                                )
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    private func finishPairing(
+        tag: NFCISO15693Tag,
+        session: NFCTagReaderSession,
+        sensorUID: Data,
+        patchInfo: Data,
+        sensorType: SensorType,
+        initialSensorData: SensorData
+    ) {
+        logNFC("Libre2 NFC: sensor status before activation: \(initialSensorData.state.description)")
+        prepareSensorForStreaming(
+            tag: tag,
+            session: session,
+            sensorUID: sensorUID,
+            patchInfo: patchInfo,
+            sensorType: sensorType,
+            sensorData: initialSensorData
+        ) { preparedResult in
+            switch preparedResult {
+            case .failure(let error):
+                self.failPairing(session: session, error: error)
+            case .success(let preparedSensorData):
+                self.enableStreaming(tag: tag, sensorUID: sensorUID, patchInfo: patchInfo) { streamingResult in
+                    switch streamingResult {
+                    case .failure(let error):
+                        self.failPairing(session: session, error: error)
+                    case .success(let macAddress):
+                        self.logNFC("Libre2 NFC: streaming enabled, MAC: \(macAddress)")
+                        self.sendUpdate(SensorPairingInfo(
+                            uuid: sensorUID,
+                            patchInfo: patchInfo,
+                            fram: Data(preparedSensorData.bytes),
+                            streamingEnabled: true,
+                            macAddress: macAddress
+                        ))
+                        session.invalidate()
+                    }
+                }
+            }
+        }
+    }
+
+    private func prepareSensorForStreaming(
+        tag: NFCISO15693Tag,
+        session: NFCTagReaderSession,
+        sensorUID: Data,
+        patchInfo: Data,
+        sensorType: SensorType,
+        sensorData: SensorData,
+        completion: @escaping (Result<SensorData, PairingError>) -> Void
+    ) {
+        switch sensorData.state {
+        case .notYetStarted:
+            logNFC("Libre2 NFC: sensor requires activation")
+            sendSubcommand(.activate, tag: tag, sensorUID: sensorUID, patchInfo: patchInfo) { result in
+                switch result {
+                case .failure(let error):
+                    self.logNFC("Libre2 NFC: activation command failed: \(error.localizedDescription)")
+                    completion(.failure(.activationFailed))
+                case .success(let response):
+                    self.logNFC("Libre2 NFC: activation command sent")
+                    self.logNFC("Libre2 NFC: activation response: \(response.hexEncodedString())")
+                    session.alertMessage = LocalizedString("Sensor activated. Checking sensor status...", comment: "")
+                    self.nfcQueue.asyncAfter(deadline: .now() + 1.0) {
+                        self.readSensorData(tag: tag, sensorUID: sensorUID, patchInfo: patchInfo, sensorType: sensorType) { rereadResult in
+                            switch rereadResult {
+                            case .failure(let error):
+                                completion(.failure(error))
+                            case .success(let reread):
+                                self.logNFC("Libre2 NFC: sensor status after activation: \(reread.sensorData.state.description)")
+                                guard reread.sensorData.state == .starting || reread.sensorData.state == .ready else {
+                                    completion(.failure(.activationFailed))
+                                    return
+                                }
+                                completion(.success(reread.sensorData))
+                            }
+                        }
+                    }
+                }
+            }
+        case .starting, .ready:
+            completion(.success(sensorData))
+        default:
+            logNFC("Libre2 NFC: unexpected sensor status before streaming: \(sensorData.state.description)")
+            completion(.failure(.unexpectedSensorState))
+        }
+    }
+
+    private func enableStreaming(
+        tag: NFCISO15693Tag,
+        sensorUID: Data,
+        patchInfo: Data,
+        completion: @escaping (Result<String, PairingError>) -> Void
+    ) {
+        logNFC("Libre2 NFC: enabling BLE streaming")
+        sendSubcommand(.enableStreaming, tag: tag, sensorUID: sensorUID, patchInfo: patchInfo) { result in
+            switch result {
+            case .failure(let error):
+                self.logNFC("Libre2 NFC: enable streaming failed: \(error.localizedDescription)")
+                completion(.failure(.streamingEnableFailed))
+            case .success(let response):
+                guard response.count == 6 else {
+                    self.logNFC("Libre2 NFC: enable streaming returned unexpected response: \(response.hexEncodedString())")
+                    completion(.failure(.streamingEnableFailed))
+                    return
+                }
+
+                let macAddress = Data(response.reversed()).hexEncodedString().uppercased()
+                completion(.success(macAddress))
+            }
+        }
+    }
+
+    private func sendSubcommand(
+        _ subcommand: Subcommand,
+        tag: NFCISO15693Tag,
+        sensorUID: Data,
+        patchInfo: Data,
+        completion: @escaping (Result<Data, Error>) -> Void
+    ) {
+        let cmd = nfcCommand(subcommand, unlockCode: unlockCode, patchInfo: patchInfo, sensorUID: sensorUID)
+        tag.customCommand(
+            requestFlags: .highDataRate,
+            customCommandCode: Int(cmd.code),
+            customRequestParameters: cmd.parameters
+        ) { response, error in
+            if let error {
+                self.logNFC("Libre2 NFC: \(subcommand) NFC error: \(error.localizedDescription)")
+                completion(.failure(error))
+                return
+            }
+
+            completion(.success(response))
+        }
+    }
+
+    private func readSensorData(
+        tag: NFCISO15693Tag,
+        sensorUID: Data,
+        patchInfo: Data,
+        sensorType: SensorType,
+        completion: @escaping (Result<(fram: Data, sensorData: SensorData), PairingError>) -> Void
+    ) {
+        readFRAM(tag: tag) { result in
+            switch result {
+            case .failure(let error):
+                self.logNFC("Libre2 NFC: FRAM read failed: \(error.localizedDescription)")
+                completion(.failure(.noSensorData))
+            case .success(let fram):
+                guard fram.count == 344 else {
+                    self.logNFC("Libre2 NFC: unexpected FRAM length: \(fram.count)")
+                    completion(.failure(.noSensorData))
+                    return
+                }
+
+                do {
+                    let decryptedBytes = try Libre2.decryptFRAM(
+                        type: sensorType,
+                        id: [UInt8](sensorUID),
+                        info: patchInfo,
+                        data: [UInt8](fram)
+                    )
+
+                    guard let sensorData = SensorData(uuid: sensorUID, bytes: decryptedBytes) else {
+                        self.logNFC("Libre2 NFC: decrypted FRAM could not create SensorData")
+                        completion(.failure(.noSensorData))
+                        return
+                    }
+
+                    completion(.success((Data(decryptedBytes), sensorData)))
+                } catch {
+                    self.logNFC("Libre2 NFC: FRAM decryption failed: \(error.localizedDescription)")
+                    completion(.failure(.decryptionError))
+                }
+            }
+        }
+    }
+
+    private func readFRAM(tag: NFCISO15693Tag, completion: @escaping (Result<Data, Error>) -> Void) {
+        let blocks = 43
+        let requestBlocks = 3
+        let requests = Int(ceil(Double(blocks) / Double(requestBlocks)))
+        let remainder = blocks % requestBlocks
+
+        var dataArray = [Data](repeating: Data(), count: blocks)
+        var firstError: Error?
+        let group = DispatchGroup()
+
+        for i in 0 ..< requests {
+            let blockCount = i == requests - 1 ? (remainder == 0 ? requestBlocks : remainder) : requestBlocks
+            let startBlock = i * requestBlocks
+            let endBlock = startBlock + blockCount - 1
+
+            group.enter()
+            tag.readMultipleBlocks(
+                requestFlags: [.highDataRate, .address],
+                blockRange: NSRange(UInt8(startBlock) ... UInt8(endBlock))
+            ) { blockArray, error in
+                if let error {
+                    self.logNFC("Libre2 NFC: read blocks \(startBlock)-\(endBlock) failed: \(error.localizedDescription)")
+                    firstError = firstError ?? error
+                } else {
+                    for j in 0 ..< blockArray.count where startBlock + j < dataArray.count {
+                        dataArray[startBlock + j] = blockArray[j]
+                    }
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: nfcQueue) {
+            if let firstError {
+                completion(.failure(firstError))
+                return
+            }
+
+            let fram = dataArray.reduce(Data(), +)
+            completion(.success(fram))
+        }
+    }
+
+    private func failPairing(session: NFCTagReaderSession, error: PairingError) {
+        logNFC("Libre2 NFC: pairing failed: \(error.localizedDescription)")
+        session.invalidate(errorMessage: error.localizedDescription)
+        sendError(error)
+    }
+
+    private func logNFC(_ message: String) {
+        print(message)
     }
 
     private func readRaw(_ address: UInt16, _ bytes: Int, buffer: Data = Data(), tag: NFCISO15693Tag, handler: @escaping (UInt16, Data, Error?) -> Void) {
