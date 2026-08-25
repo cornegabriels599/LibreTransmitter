@@ -29,6 +29,7 @@ public enum NotificationHelper {
         case invalidChecksum = "com.loopkit.libremiaomiao.invalidChecksum-notification"
         case calibrationOngoing = "com.loopkit.libremiaomiao.calibration-notification"
         case libre2directFinishedSetup = "com.loopkit.libremiaomiao.libre2direct-notification"
+        case warmupComplete = "com.loopkit.libremiaomiao.warmupComplete-notification"
     }
     
     public static var shouldRequestCriticalPermissions = false
@@ -146,8 +147,17 @@ public extension NotificationHelper {
             let content = UNMutableNotificationContent()
             content.title = "Libre 2 Direct Setup Complete"
             content.body = "Establishing initial connection can take up to 4 minutes. Keep your phone unlocked and Loop in the foreground while connecting"
-
             addRequest(identifier: .libre2directFinishedSetup, content: content)
+        }
+    }
+    
+    static func sendWarmupCompleteNotification() {
+        ensureCanSendNotification {
+            let content = UNMutableNotificationContent()
+            content.title = "Sensor Warmup Complete"
+            content.body = "Your sensor is now ready. Glucose readings are reliable and loop is active."
+            content.sound = .default
+            addRequest(identifier: .warmupComplete, content: content)
         }
     }
     
