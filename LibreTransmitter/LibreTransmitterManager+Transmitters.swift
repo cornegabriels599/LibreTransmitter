@@ -134,6 +134,14 @@ extension LibreTransmitterManagerV3 {
 
             self.logger.debug("handleGoodReading returned with \(newGlucoses.count) entries")
             self.delegateQueue.async {
+                // During warmup (first 60 minutes), glucose data is unreliable
+                // Don't send to loop to prevent incorrect dosing decisions
+                if self.sensorInfoObservable.isInWarmup {
+                    self.logger.debug("Sensor is in warmup phase, not sending glucose data to loop")
+                    self.cgmManagerDelegate?.cgmManager(self, hasNew: .noData)
+                    return
+                }
+                
                 var result: CGMReadingResult
                 // If several readings from a valid and running sensor come out empty,
                 // we have (with a large degree of confidence) a sensor that has been

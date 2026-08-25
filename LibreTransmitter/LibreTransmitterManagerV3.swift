@@ -386,6 +386,14 @@ extension LibreTransmitterManagerV3 {
 
                 self.sensorInfoObservable.sensorState = sensorData.state.description
                 self.sensorInfoObservable.sensorSerial = sensorData.serialNumber
+                
+                let wasInWarmup = self.sensorInfoObservable.isInWarmup
+                self.sensorInfoObservable.updateWarmupState()
+                
+                // Send notification when warmup completes
+                if wasInWarmup && !self.sensorInfoObservable.isInWarmup {
+                    NotificationHelper.sendWarmupCompleteNotification()
+                }
 
                 self.glucoseInfoObservable.checksum = String(sensorData.footerCrc.byteSwapped)
 
@@ -433,7 +441,7 @@ extension LibreTransmitterManagerV3 {
                 }
                 
                 self.sensorInfoObservable.sensorMinutesLeft = minutesLeft
-                self.sensorInfoObservable.sensorMinutesSinceStart = minutesLeft
+                self.sensorInfoObservable.sensorMinutesSinceStart = minutesSinceStart
                 
                 self.sensorInfoObservable.activatedAt = now - TimeInterval(minutes: Double(minutesSinceStart))
                 
@@ -449,6 +457,14 @@ extension LibreTransmitterManagerV3 {
                 self.sensorInfoObservable.sensorState = "Operational"
                 let family = SensorFamily.libre2
                 self.sensorInfoObservable.sensorSerial = SensorSerialNumber(withUID: sensor.uuid, sensorFamily: family)?.serialNumber ?? "-"
+                
+                let wasInWarmup = self.sensorInfoObservable.isInWarmup
+                self.sensorInfoObservable.updateWarmupState()
+                
+                // Send notification when warmup completes
+                if wasInWarmup && !self.sensorInfoObservable.isInWarmup {
+                    NotificationHelper.sendWarmupCompleteNotification()
+                }
 
                 if let mapping = UserDefaults.standard.calibrationMapping,
                    let calibration = self.calibrationData,

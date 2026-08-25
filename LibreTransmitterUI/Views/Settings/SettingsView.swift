@@ -114,6 +114,9 @@ struct SettingsView: View {
     var body: some View {
             List {
                 headerSection
+                if sensorInfo.isInWarmup {
+                    warmupSection
+                }
                 snoozeSection
                 measurementSection
                 if let date = glucoseMeasurement.predictionDate, let prediction = glucoseMeasurement.prediction {
@@ -154,6 +157,56 @@ struct SettingsView: View {
                     .foregroundColor(.blue)
                 
             }
+        }
+    }
+    
+    var warmupSection: some View {
+        Section(header: Text(LocalizedString("Sensor Warming Up", comment: "Text describing header for sensor warmup section"))) {
+            VStack(spacing: 12) {
+                // Circular warmup progress
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 8)
+                        .frame(width: 120, height: 120)
+                    
+                    Circle()
+                        .trim(from: 0, to: CGFloat(sensorInfo.warmupProgress))
+                        .stroke(
+                            LinearGradient(
+                                gradient: Gradient(colors: [.orange, .yellow]),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                        )
+                        .frame(width: 120, height: 120)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 1), value: sensorInfo.warmupProgress)
+                    
+                    VStack(spacing: 4) {
+                        Text("\(sensorInfo.warmupMinutesRemaining)")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                        
+                        Text(LocalizedString("min", comment: "Abbreviation for minutes in warmup countdown"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 8)
+                
+                Text(LocalizedString("Sensor is warming up. Glucose readings are not reliable during this period.", comment: "Text describing sensor warmup message"))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                
+                Text(LocalizedString("Loop is paused until warmup completes.", comment: "Text describing loop status during warmup"))
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
         }
     }
 

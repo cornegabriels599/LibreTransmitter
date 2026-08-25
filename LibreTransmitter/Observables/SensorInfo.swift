@@ -21,6 +21,28 @@ public class SensorInfo: ObservableObject, Equatable, Hashable {
     @Published public var activatedAt : Date?
     @Published public var expiresAt : Date?
     
+    // MARK: - Warmup state
+    public static let warmupDurationMinutes: Int = 60
+    @Published public var isInWarmup: Bool = false
+    @Published public var warmupMinutesRemaining: Int = 0
+    
+    public var warmupProgress: Double {
+        guard isInWarmup else { return 1.0 }
+        let elapsed = Double(Self.warmupDurationMinutes - warmupMinutesRemaining)
+        return min(max(elapsed / Double(Self.warmupDurationMinutes), 0), 1.0)
+    }
+    
+    public func updateWarmupState() {
+        let remaining = Self.warmupDurationMinutes - sensorMinutesSinceStart
+        if remaining > 0 {
+            isInWarmup = true
+            warmupMinutesRemaining = remaining
+        } else {
+            isInWarmup = false
+            warmupMinutesRemaining = 0
+        }
+    }
+    
     public func calculateProgress() -> Double {
         let minutesLeft = Double(self.sensorMinutesLeft)
         let maxWearTime = Double(self.sensorMaxMinutesWearTime)
@@ -67,7 +89,8 @@ public class SensorInfo: ObservableObject, Equatable, Hashable {
     public static func == (lhs: SensorInfo, rhs: SensorInfo) -> Bool {
          lhs.sensorAge == rhs.sensorAge && lhs.sensorAgeLeft == rhs.sensorAgeLeft &&
          lhs.sensorEndTime == rhs.sensorEndTime && lhs.sensorState == rhs.sensorState &&
-         lhs.sensorSerial == rhs.sensorSerial
+         lhs.sensorSerial == rhs.sensorSerial && lhs.isInWarmup == rhs.isInWarmup &&
+         lhs.warmupMinutesRemaining == rhs.warmupMinutesRemaining
 
      }
 
