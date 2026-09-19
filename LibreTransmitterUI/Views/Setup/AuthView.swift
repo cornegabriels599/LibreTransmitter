@@ -125,7 +125,7 @@ struct AuthView: View {
                 
                 HStack {
                     InstructionList(instructions: [
-                        LocalizedString("Activate and finish warming up a new sensor with another app or physical reader.", comment: "Label text for step 1 of AuthView"),
+                        LocalizedString("A new Libre 2 Direct sensor can be activated during NFC pairing.", comment: "Label text for step 1 of AuthView"),
                         LocalizedString("Press the Authenticate Button.", comment: "Label text for step 2 of AuthView"),
                         LocalizedString("Proceed to pair new sensor in the next screens. Note that you will loose connection to any existing sensor or transmitter", comment: "Label text for step 3 of AuthView")
                     ])

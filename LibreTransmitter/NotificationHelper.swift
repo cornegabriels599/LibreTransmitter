@@ -155,7 +155,7 @@ public extension NotificationHelper {
         ensureCanSendNotification {
             let content = UNMutableNotificationContent()
             content.title = "Sensor Warmup Complete"
-            content.body = "Your sensor is now ready. Glucose readings are reliable and loop is active."
+            content.body = "Your sensor is ready. Trio can now use its glucose readings."
             content.sound = .default
             addRequest(identifier: .warmupComplete, content: content)
         }

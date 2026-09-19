@@ -18,6 +18,12 @@ struct LibreLifecycleProgress: DeviceLifecycleProgress {
     var progressState: LoopKit.DeviceLifecycleProgressState
 }
 
+private struct LibreStatusHighlight: DeviceStatusHighlight {
+    let localizedMessage: String
+    let imageName: String
+    let state: DeviceStatusHighlightState
+}
+
 extension LibreTransmitterManagerV3: CGMManagerUI {
 
     public var cgmStatusBadge: DeviceStatusBadge? {
@@ -99,10 +105,26 @@ extension LibreTransmitterManagerV3: CGMManagerUI {
     }
 
     public var cgmStatusHighlight: DeviceStatusHighlight? {
-        nil
+        guard sensorInfoObservable.isInWarmup else { return nil }
+
+        return LibreStatusHighlight(
+            localizedMessage: LocalizedString(
+                "Sensor\nWarmup",
+                comment: "CGM status highlight while a Libre sensor is warming up"
+            ),
+            imageName: "hourglass",
+            state: .normalCGM
+        )
     }
 
     public var cgmLifecycleProgress: DeviceLifecycleProgress? {
+        if sensorInfoObservable.isInWarmup {
+            return LibreLifecycleProgress(
+                percentComplete: sensorInfoObservable.warmupProgress,
+                progressState: .warning
+            )
+        }
+
         if self.sensorInfoObservable.activatedAt == nil {
             // This is the initial state before the plugin
             // has connected to the sensor and retrieved its cgmLifecycleProgress

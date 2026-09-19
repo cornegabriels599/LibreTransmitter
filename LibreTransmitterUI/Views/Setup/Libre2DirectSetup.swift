@@ -103,7 +103,8 @@ struct Libre2DirectSetup: View {
                 getLeadingImage()
                 HStack {
                     InstructionList(instructions: [
-                        LocalizedString("Your sensor must be activated and fully warmed up.", comment: "Label text for step 1 of libre2 setup"),
+                        LocalizedString("A new sensor is activated automatically when you scan it with NFC.", comment: "Label text for step 1 of libre2 setup"),
+                        LocalizedString("During the 60-minute warmup, sensor readings are paused and Trio shows the remaining time.", comment: "Label text for warmup behavior during libre2 setup"),
                         LocalizedString("Disconnect and unpair any other app or device communicating with the sensor via bluetooth.", comment: "Label text for step 2 of libre2 setup"),
                         LocalizedString("Keep phone unlocked and your Loop app in the foreground.", comment: "Label text for step 3 of libre2 setup"),
                         LocalizedString("The Bluetooth connection will take up to four minutes before it starts working.", comment: "Label text for step 3 of libre2 setup")

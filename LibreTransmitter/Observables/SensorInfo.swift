@@ -25,6 +25,14 @@ public class SensorInfo: ObservableObject, Equatable, Hashable {
     public static let warmupDurationMinutes: Int = 60
     @Published public var isInWarmup: Bool = false
     @Published public var warmupMinutesRemaining: Int = 0
+
+    public static func warmupMinutesRemaining(sensorMinutesSinceStart: Int) -> Int {
+        max(warmupDurationMinutes - max(sensorMinutesSinceStart, 0), 0)
+    }
+
+    public static func isInWarmup(sensorMinutesSinceStart: Int) -> Bool {
+        warmupMinutesRemaining(sensorMinutesSinceStart: sensorMinutesSinceStart) > 0
+    }
     
     public var warmupProgress: Double {
         guard isInWarmup else { return 1.0 }
@@ -33,14 +41,10 @@ public class SensorInfo: ObservableObject, Equatable, Hashable {
     }
     
     public func updateWarmupState() {
-        let remaining = Self.warmupDurationMinutes - sensorMinutesSinceStart
-        if remaining > 0 {
-            isInWarmup = true
-            warmupMinutesRemaining = remaining
-        } else {
-            isInWarmup = false
-            warmupMinutesRemaining = 0
-        }
+        warmupMinutesRemaining = Self.warmupMinutesRemaining(
+            sensorMinutesSinceStart: sensorMinutesSinceStart
+        )
+        isInWarmup = warmupMinutesRemaining > 0
     }
     
     public func calculateProgress() -> Double {

@@ -134,7 +134,7 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
                         type: .sensorStart,
                         deviceIdentifier: sensorId,
                         expectedLifetime: .hours(24 * 14 + 12),
-                        warmupPeriod: .hours(1)
+                        warmupPeriod: TimeInterval(SensorInfo.warmupDurationMinutes * 60)
                         )
         
         self.delegateQueue.async {
@@ -387,13 +387,7 @@ extension LibreTransmitterManagerV3 {
                 self.sensorInfoObservable.sensorState = sensorData.state.description
                 self.sensorInfoObservable.sensorSerial = sensorData.serialNumber
                 
-                let wasInWarmup = self.sensorInfoObservable.isInWarmup
-                self.sensorInfoObservable.updateWarmupState()
-                
-                // Send notification when warmup completes
-                if wasInWarmup && !self.sensorInfoObservable.isInWarmup {
-                    NotificationHelper.sendWarmupCompleteNotification()
-                }
+                self.updateWarmupStateAndNotifyIfNeeded()
 
                 self.glucoseInfoObservable.checksum = String(sensorData.footerCrc.byteSwapped)
 
@@ -458,13 +452,7 @@ extension LibreTransmitterManagerV3 {
                 let family = SensorFamily.libre2
                 self.sensorInfoObservable.sensorSerial = SensorSerialNumber(withUID: sensor.uuid, sensorFamily: family)?.serialNumber ?? "-"
                 
-                let wasInWarmup = self.sensorInfoObservable.isInWarmup
-                self.sensorInfoObservable.updateWarmupState()
-                
-                // Send notification when warmup completes
-                if wasInWarmup && !self.sensorInfoObservable.isInWarmup {
-                    NotificationHelper.sendWarmupCompleteNotification()
-                }
+                self.updateWarmupStateAndNotifyIfNeeded()
 
                 if let mapping = UserDefaults.standard.calibrationMapping,
                    let calibration = self.calibrationData,
@@ -496,6 +484,15 @@ extension LibreTransmitterManagerV3 {
                 self.glucoseInfoObservable.prediction = nil
                 self.glucoseInfoObservable.predictionDate = nil
             }
+        }
+    }
+
+    private func updateWarmupStateAndNotifyIfNeeded() {
+        let wasInWarmup = sensorInfoObservable.isInWarmup
+        sensorInfoObservable.updateWarmupState()
+
+        if wasInWarmup && !sensorInfoObservable.isInWarmup {
+            NotificationHelper.sendWarmupCompleteNotification()
         }
     }
 

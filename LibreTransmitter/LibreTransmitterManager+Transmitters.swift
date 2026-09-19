@@ -129,6 +129,12 @@ extension LibreTransmitterManagerV3 {
 
             self.latestPrediction = prediction?.first
 
+            // Derive safety state from this packet. setObservables publishes on
+            // the main queue, so its observable can still hold the previous value.
+            let isInWarmup = SensorInfo.isInWarmup(
+                sensorMinutesSinceStart: sensorData.minutesSinceStart
+            )
+
             // must be inside this handler as setobservables "depend" on latestbackfill
             self.setObservables(sensorData: sensorData, bleData: nil, metaData: nil)
 
@@ -136,7 +142,7 @@ extension LibreTransmitterManagerV3 {
             self.delegateQueue.async {
                 // During warmup (first 60 minutes), glucose data is unreliable
                 // Don't send to loop to prevent incorrect dosing decisions
-                if self.sensorInfoObservable.isInWarmup {
+                if isInWarmup {
                     self.logger.debug("Sensor is in warmup phase, not sending glucose data to loop")
                     self.cgmManagerDelegate?.cgmManager(self, hasNew: .noData)
                     return

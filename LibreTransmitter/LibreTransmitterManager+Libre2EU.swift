@@ -96,13 +96,17 @@ extension LibreTransmitterManagerV3 {
             self.countTimesWithoutData = 0
         }
 
+        // Derive safety state from this packet. setObservables publishes on
+        // the main queue, so its observable can still hold the previous value.
+        let isInWarmup = SensorInfo.isInWarmup(sensorMinutesSinceStart: bleData.age)
+
         self.setObservables(sensorData: nil, bleData: bleData, metaData: Device)
 
         self.logger.debug("handleGoodReading returned with \(newGlucose.count) entries")
         self.delegateQueue.async {
             // During warmup (first 60 minutes), glucose data is unreliable
             // Don't send to loop to prevent incorrect dosing decisions
-            if self.sensorInfoObservable.isInWarmup {
+            if isInWarmup {
                 self.logger.debug("Sensor is in warmup phase, not sending glucose data to loop")
                 self.cgmManagerDelegate?.cgmManager(self, hasNew: .noData)
                 return
