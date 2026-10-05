@@ -478,13 +478,6 @@ public final class LibreTransmitterProxyManager: NSObject, CBCentralManagerDeleg
 
         logger.debug("Did discover peripheral while state \(String(describing: self.state.rawValue)) with name: \(String(describing: peripheral.name)), wantstoterminate?: \(self.wantsToTerminate)")
 
-        guard !Libre2DirectTransmitter.isTrainingSimulator(peripheral)
-            || Libre2DirectTransmitter.trainingSimulatorAllowed
-        else {
-            logger.error("Ignoring Libre 2 training simulator outside a DEBUG build")
-            return
-        }
-
         // Libre2:
         // during setup, we find the uid by scanning via nfc
         // first time connecting to a libre2 sensor via bluetooth we don't know its peripheral identifier
@@ -556,15 +549,6 @@ public final class LibreTransmitterProxyManager: NSObject, CBCentralManagerDeleg
         dispatchPrecondition(condition: .onQueue(managerQueue))
 
         logger.debug("Did connect peripheral while state \(String(describing: self.state.rawValue)) with name: \(String(describing: peripheral.name))")
-        guard !Libre2DirectTransmitter.isTrainingSimulator(peripheral)
-            || Libre2DirectTransmitter.trainingSimulatorAllowed
-        else {
-            logger.error("Disconnecting persisted Libre 2 training simulator outside a DEBUG build")
-            state = .UnknownDevice
-            central.cancelPeripheralConnection(peripheral)
-            return
-        }
-
         if central.isScanning {
             central.stopScan()
         }
