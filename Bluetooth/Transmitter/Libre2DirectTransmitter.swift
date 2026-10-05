@@ -7,6 +7,19 @@ import os.log
 import UIKit
 
 class Libre2DirectTransmitter: LibreTransmitterProxyProtocol {
+    static let trainingSimulatorName = "ABBOTTTRIOSIM01"
+
+    static var trainingSimulatorAllowed: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+
+    static func isTrainingSimulator(_ peripheral: PeripheralProtocol) -> Bool {
+        peripheral.name == trainingSimulatorName
+    }
 
     fileprivate lazy var logger = Logger(forType: Self.self)
 
@@ -54,7 +67,13 @@ class Libre2DirectTransmitter: LibreTransmitterProxyProtocol {
         guard let name = peripheral.name else {
             return false
         }
-        
+
+        if isTrainingSimulator(peripheral) {
+            // A persisted Debug pairing must never become usable when the same
+            // bundle is subsequently installed as Release/TestFlight.
+            return trainingSimulatorAllowed
+        }
+
         if name.lowercased().starts(with: "abbott") == true {
             print("Libre 2 detected using legacy name format as matcher")
             return true

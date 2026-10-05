@@ -87,6 +87,39 @@ struct Libre2DirectSetup: View {
 
     }
 
+    #if DEBUG
+    /// Provisions only the fixed profile advertised by Libre2BLESimulator.
+    /// This bypasses NFC and is unavailable in Release/TestFlight builds.
+    func pairTrainingSimulator() {
+        let uid = Data([0xD6, 0xF1, 0x0F, 0x01, 0x00, 0xA4, 0x07, 0xE0])
+        let patchInfo = Data([0x9D, 0x08, 0x30, 0x01, 0x9C, 0x16])
+        let calibration = SensorData.CalibrationInfo(
+            i1: 0, i2: 1, i3: 0, i4: 6500, i5: 0, i6: 1066,
+            isValidForFooterWithReverseCRCs: 0
+        )
+        do {
+            try KeychainManager.standard.setLibreNativeCalibrationData(calibration)
+        } catch {
+            presentableStatus = StatusMessage(
+                title: "Training simulator setup failed",
+                message: error.localizedDescription
+            )
+            return
+        }
+        UserDefaults.standard.calibrationMapping = CalibrationToSensorMapping(
+            uuid: uid, reverseFooterCRC: 0
+        )
+        UserDefaults.standard.preSelectedSensor = Sensor(
+            uuid: uid, patchInfo: patchInfo, maxAge: 14 * 24 * 60,
+            sensorName: "3MH000GUR5W", macAddress: "ABBOTTTRIOSIM01"
+        )
+        SelectionState.shared.selectedUID = uid
+        SelectionState.shared.selectedStringIdentifier = nil
+        saveNotifier.notify()
+        NotificationHelper.sendLibre2DirectFinishedSetupNotifcation()
+    }
+    #endif
+
     var cancelButton: some View {
         Button("Cancel") {
             print("cancel button pressed")
@@ -128,6 +161,14 @@ struct Libre2DirectSetup: View {
                 }
                 .actionButtonStyle(.primary)
                 .disabled(isPairing)
+                #if DEBUG
+                Button("Use Libre 2 Training Simulator") {
+                    pairTrainingSimulator()
+                }
+                .actionButtonStyle(.secondary)
+                .disabled(isPairing)
+                .accessibilityHint("Connects only to the TRAINING Libre 2 simulator")
+                #endif
             }.padding()
         }
         .navigationTitle("Libre 2 Setup")
