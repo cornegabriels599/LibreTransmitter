@@ -52,23 +52,32 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
         []
     }
 
-    public func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
+    public func acknowledgeAlert(alertIdentifier _: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
         completion(nil)
     }
-    
+
     func logDeviceCommunication(_ message: String, type: DeviceLogEntryType = .send) {
-        self.cgmManagerDelegate?.deviceManager(self, logEventForDeviceIdentifier: UserDefaults.standard.currentSensor, type: type, message: message, completion: nil)
+        cgmManagerDelegate?.deviceManager(
+            self,
+            logEventForDeviceIdentifier: UserDefaults.standard.currentSensor,
+            type: type,
+            message: message,
+            completion: nil
+        )
     }
 
     public func libreManagerDidRestoreState(found peripherals: [CBPeripheral], connected to: CBPeripheral?) {
-        let devicename = to?.name  ?? "no device"
+        let devicename = to?.name ?? "no device"
         let id = to?.identifier.uuidString ?? "null"
-        
-        logger.debug("Bluetooth State restored (Loop restarted?). Found \(peripherals.count) peripherals, and connected to \(devicename) with identifier \(id)")
+
+        logger
+            .debug(
+                "Bluetooth State restored (Loop restarted?). Found \(peripherals.count) peripherals, and connected to \(devicename) with identifier \(id)"
+            )
     }
 
     public var batteryLevel: Double? {
-        let batt = self.proxy?.metadata?.battery
+        let batt = proxy?.metadata?.battery
         logger.debug("LibreTransmitterManager was asked to return battery: \(batt.debugDescription)")
         // convert from 8% -> 0.8
         if let battery = proxy?.metadata?.battery {
@@ -105,62 +114,56 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
             return "nil"
         }
 
-        let c = self.calibrationData?.description ?? "no calibrationdata"
+        let c = calibrationData?.description ?? "no calibrationdata"
         return data.array.map {
             "SensorData(uuid: \"0123\".data(using: .ascii)!, bytes: \($0.bytes))!"
         }
         .joined(separator: ",\n")
         + ",\n Calibrationdata: \(c)"
     }
-    
+
     public func verifySensorChange(for sensor: Data, activatedAt: Date) {
-        
         let sensorId = sensor.hexEncodedString()
         let currentSensor = UserDefaults.standard.currentSensor
-        
-        logger.debug("\(#function) for potential new sensor identified by uid: \(sensorId), currentsensor: \(String(describing: currentSensor))")
-        
+
+        logger.debug("\(#function) checking whether the selected sensor changed")
+
         guard currentSensor == nil || currentSensor != sensorId else {
             logger.debug("\(#function) no sensorchange detected")
             return
         }
-        
-        logDeviceCommunication("New sensor \(sensorId) discovered, activated at \(activatedAt)", type: .connection)
-        
+
+        logDeviceCommunication("New Libre sensor confirmed with activation time", type: .connection)
+
         logger.debug("\(#function) sensorchange detected")
-            
+
         let event = PersistedCgmEvent(
-                        date: activatedAt,
-                        type: .sensorStart,
-                        deviceIdentifier: sensorId,
-                        expectedLifetime: .hours(24 * 14 + 12),
-                        warmupPeriod: TimeInterval(SensorInfo.warmupDurationMinutes * 60)
-                        )
-        
-        self.delegateQueue.async {
+            date: activatedAt,
+            type: .sensorStart,
+            deviceIdentifier: sensorId,
+            expectedLifetime: .hours(24 * 14 + 12),
+            warmupPeriod: TimeInterval(SensorInfo.warmupDurationMinutes * 60)
+        )
+
+        delegateQueue.async {
             self.cgmManagerDelegate?.cgmManager(self, hasNew: [event])
         }
-        
-        
+
         UserDefaults.standard.currentSensor = sensorId
-        
-        
-        
     }
 
     public var debugDescription: String {
-
-        return [
+        [
             "## LibreTransmitterManager",
             "Testdata: foo",
             "lastConnected: \(String(describing: lastConnected))",
-            "Connection state: \(String(describing: self.proxy?.connectionStateString))",
+            "Connection state: \(String(describing: proxy?.connectionStateString))",
             "Sensor state: \(String(describing: proxy?.sensorData?.state.description))",
             "transmitterbattery: \(String(describing: proxy?.metadata?.batteryString))",
             "SensorData: \(getPersistedSensorDataForDebug())",
             "providesBLEHeartbeat: \(providesBLEHeartbeat)",
             "Metainfo::\n\(AppMetaData.allProperties)",
-            ""
+            "",
         ].joined(separator: "\n")
     }
 
@@ -262,16 +265,30 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
     }
 
     var isDeviceSelected: Bool {
-        return UserDefaults.standard.preSelectedDevice != nil || UserDefaults.standard.preSelectedUid != nil || SelectionState.shared.selectedUID != nil
+        UserDefaults.standard.preSelectedDevice != nil || UserDefaults.standard.preSelectedUid != nil || SelectionState.shared
+            .selectedUID != nil
     }
-    
+
     public func resetManager() {
         proxy?.activePlugin?.reset()
         disconnect()
         transmitterInfoObservable = TransmitterInfo()
         sensorInfoObservable = SensorInfo()
         glucoseInfoObservable = GlucoseInfo()
-        
+    }
+
+    /// Publishes a confirmed NFC activation while BLE is still reconnecting.
+    /// The first BLE packet always replaces this estimate with sensor-reported age.
+    public func publishPendingLibre2ActivationIfAvailable() {
+        guard let sensor = UserDefaults.standard.preSelectedSensor,
+              let activatedAt = PendingLibre2ActivationStore().activationDate(for: sensor.uuid)
+        else { return }
+
+        let elapsedMinutes = max(Int(Date().timeIntervalSince(activatedAt) / 60), 0)
+        sensorInfoObservable.activatedAt = activatedAt
+        sensorInfoObservable.sensorMinutesSinceStart = elapsedMinutes
+        sensorInfoObservable.updateWarmupState()
+        logger.info("Published UID-scoped pending Libre 2 activation for warmup display")
     }
 
     public func disconnect() {
@@ -320,18 +337,20 @@ open class LibreTransmitterManagerV3: CGMManager, LibreTransmitterDelegate {
     internal var countTimesWithoutData: Int = 0
 
     open var pairingService: SensorPairingProtocol {
-        return SensorPairingService()
+        SensorPairingService()
     }
 
     open var bluetoothSearcher: BluetoothSearcher {
-        return BluetoothSearchManager()
+        BluetoothSearchManager()
     }
 }
 
 // MARK: - Convenience functions
-extension LibreTransmitterManagerV3 {
 
-    internal func createBloodSugarPrediction(_ measurements: [Measurement], calibration: SensorData.CalibrationInfo) -> LibreGlucose? {
+extension LibreTransmitterManagerV3 {
+    internal func createBloodSugarPrediction(_ measurements: [Measurement],
+                                             calibration: SensorData.CalibrationInfo) -> LibreGlucose?
+    {
         let allGlucoses = measurements.sorted { $0.date > $1.date }
 
         // Increase to up to 15 to move closer to real blood sugar

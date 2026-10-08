@@ -29,8 +29,13 @@ class LibreTransmitterSetupViewController: UINavigationController, CGMManagerOnb
         let cancelNotifier = GenericObservableObject()
         let saveNotifier = GenericObservableObject()
 
-        let myView = ModeSelectionView(cancelNotifier: cancelNotifier, saveNotifier: saveNotifier, pairingService: cgmManager.pairingService, bluetoothSearcher: cgmManager.bluetoothSearcher)
-            .environmentObject(displayGlucosePreference)
+        let myView = ModeSelectionView(
+            cancelNotifier: cancelNotifier,
+            saveNotifier: saveNotifier,
+            pairingService: cgmManager.pairingService,
+            bluetoothSearcher: cgmManager.bluetoothSearcher
+        )
+        .environmentObject(displayGlucosePreference)
 
         super.init(rootViewController: UIHostingController(rootView: myView))
 
@@ -50,45 +55,39 @@ class LibreTransmitterSetupViewController: UINavigationController, CGMManagerOnb
     }
 
     @available(*, unavailable)
-    required init?(coder aDecoder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     @objc
     private func cancel() {
         completionDelegate?.completionNotifyingDidComplete(self)
-
     }
 
     @objc
     private func save() {
-
         let hasNewDevice = SelectionState.shared.selectedStringIdentifier != UserDefaults.standard.preSelectedDevice
         if hasNewDevice, let newDevice = SelectionState.shared.selectedStringIdentifier {
             logger.debug("Setupcontroller will set new device to \(newDevice)")
             UserDefaults.standard.preSelectedDevice = newDevice
             SelectionState.shared.selectedUID = nil
             UserDefaults.standard.preSelectedUid = nil
-            
 
         } else if let newUID = SelectionState.shared.selectedUID {
             // this one is only temporary,
             // as we don't know the bluetooth identifier during nfc setup
-            logger.debug("Setupcontroller will set new libre2 device to \(newUID.hex)")
-            
+            logger.debug("Setup controller will save the confirmed Libre 2 sensor")
 
             UserDefaults.standard.preSelectedUid = newUID
             SelectionState.shared.selectedUID = nil
             UserDefaults.standard.preSelectedDevice = nil
-            
 
         } else {
-
             // this cannot really happen unless you are a developer and have previously
             // stored both preSelectedDevice and selectedUID !
         }
 
-
+        cgmManager.publishPendingLibre2ActivationIfAvailable()
         cgmManager.establishProxy()
 
         logger.debug("Setupcontroller Saving from setup")
